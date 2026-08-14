@@ -8,7 +8,6 @@ import google.generativeai as genai
 import os
 import logging
 
-# エラーを詳しく見るためにログ設定
 logging.basicConfig(level=logging.INFO)
 
 app = FastAPI()
@@ -21,10 +20,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Renderの環境変数設定を確認してください
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+# 環境変数の取得（末尾の余分な /rest/v1 や / を自動で削る安全対策）
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
+if SUPABASE_URL.endswith("/rest/v1"):
+    SUPABASE_URL = SUPABASE_URL[:-8]
+
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "").strip()
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 genai.configure(api_key=GEMINI_API_KEY)
@@ -49,7 +51,6 @@ async def add_item(req: ItemRequest):
     except Exception as e:
         logging.error(f"OGP取得スキップ: {e}")
 
-    # project_name を含めて保存
     data = {
         "project_name": req.project_name,
         "category": req.category,
@@ -67,13 +68,15 @@ async def add_item(req: ItemRequest):
 
 @app.get("/api/items")
 def get_items():
-    # 全データを取得してフロントエンドで整理します
-    response = supabase.table("items").select("*").order("created_at", desc=True).execute()
-    return response.data
+    try:
+        response = supabase.table("items").select("*").order("created_at", desc=True).execute()
+        return response.data
+    except Exception as e:
+        logging.error(f"DB取得エラー: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/recommend")
 def recommend_items(req: dict):
-    # 特定のカテゴリ（製品）に対する提案
     items = supabase.table("items").select("title, comment").eq("category", req.get("category")).execute()
     item_texts = [f"- {item['title']} (メモ: {item['comment']})" for item in items.data]
     
